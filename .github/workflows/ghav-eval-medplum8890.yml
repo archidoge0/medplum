@@ -1,0 +1,56 @@
+name: GHAV medplum 8890 docs build
+
+on:
+  push:
+    branches:
+      - codex/ghav-medplum8890-*
+
+permissions:
+  contents: read
+
+jobs:
+  build-docs:
+    name: Build the docs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      NODE_OPTIONS: --max-old-space-size=8192
+      NODE_VERSION: '22'
+      SECRETS_TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+      - name: Cache node modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        env:
+          cache-name: cache-node-modules
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}-
+            ${{ runner.os }}-build-
+            ${{ runner.os }}-
+      - name: Setup TurboRepo
+        if: ${{ env.SECRETS_TURBO_TOKEN != '' }}
+        run: |
+          echo "TURBO_TOKEN=${{ secrets.TURBO_TOKEN }}" >> $GITHUB_ENV
+          echo "TURBO_TEAM=${{ secrets.TURBO_TEAM }}" >> $GITHUB_ENV
+          echo "TURBO_CACHE=remote:rw" >> $GITHUB_ENV
+      - name: Build Project
+        run: ./scripts/build-docs.sh
+        env:
+          MEDPLUM_BASE_URL: '__MEDPLUM_BASE_URL__'
+          MEDPLUM_CLIENT_ID: '__MEDPLUM_CLIENT_ID__'
+          MEDPLUM_REGISTER_ENABLED: '__MEDPLUM_REGISTER_ENABLED__'
+          GOOGLE_CLIENT_ID: '__GOOGLE_CLIENT_ID__'
+          RECAPTCHA_SITE_KEY: '__RECAPTCHA_SITE_KEY__'
