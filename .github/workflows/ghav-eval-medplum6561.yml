@@ -1,0 +1,64 @@
+name: GHAV Medplum 6561 Linux agent
+
+on:
+  push:
+    branches: [codex/ghav-medplum6561-*]
+
+permissions:
+  contents: read
+
+jobs:
+  build-agent-linux:
+    name: Build Linux agent
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      NODE_VERSION: '20'
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
+      TURBO_CACHE: 'remote:rw'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20.20.2
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Cache node modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        env:
+          cache-name: cache-node-modules
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-build-agent-${{ env.cache-name }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-build-agent-${{ env.cache-name }}-
+            ${{ runner.os }}-build-agent
+            ${{ runner.os }}-
+      - name: Install dependencies
+        run: npm ci --maxsockets 1
+      - name: Build
+        run: npm run build -- --filter=@medplum/agent
+      - name: Build Agent
+        shell: bash
+        run: ./scripts/build-agent-installer-linux.sh
+      - name: Set Medplum version
+        shell: bash
+        run: |
+          set -e
+          echo "MEDPLUM_VERSION=$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
+      - name: Make tarball
+        shell: bash
+        run: |
+          set -e
+          mkdir medplum-agent-$MEDPLUM_VERSION-linux
+          cp packages/agent/medplum-agent-$MEDPLUM_VERSION-linux ./medplum-agent-$MEDPLUM_VERSION-linux
+          cp packages/agent/medplum-agent-$MEDPLUM_VERSION-linux.sha256 ./medplum-agent-$MEDPLUM_VERSION-linux
+          tar -czvf ./medplum-agent-$MEDPLUM_VERSION-linux.tar.gz ./medplum-agent-$MEDPLUM_VERSION-linux
+      - name: Upload agent installer
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: medplum-agent-${{ env.MEDPLUM_VERSION }}-linux
+          path: medplum-agent-${{ env.MEDPLUM_VERSION }}-linux.tar.gz
