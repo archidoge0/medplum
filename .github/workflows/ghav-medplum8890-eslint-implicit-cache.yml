@@ -1,0 +1,99 @@
+name: GHAV Medplum 8890 complete ESLint human
+
+on:
+  push:
+    branches:
+      - codex/ghav-medplum8890-eslint-human
+
+permissions:
+  contents: read
+
+jobs:
+  eslint:
+    name: Run eslint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      SECRETS_TURBO_TOKEN: ''
+    outputs:
+      eslint_errs: ${{ steps.fmt.outputs.eslint_errs }}
+    steps:
+      - name: Checkout pinned Before source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: 639da369d86e232359a9f37356a32df2046dbaa4
+          persist-credentials: false
+      - name: Verify source commit and lock
+        run: |
+          test "$(git rev-parse HEAD)" = '639da369d86e232359a9f37356a32df2046dbaa4'
+          test "$(git rev-parse HEAD^{tree})" = '0fc5117435ef5970e0662937b8680009a5c5543b'
+          test -s package-lock.json
+          echo "GHAV_SOURCE_SHA=$(git rev-parse HEAD)"
+          echo "GHAV_SOURCE_TREE=$(git rev-parse HEAD^{tree})"
+          echo "GHAV_INPUT_LOCK=$(sha256sum package-lock.json | cut -d' ' -f1)"
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.21.0'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+      - name: Cache node modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        env:
+          cache-name: cache-node-modules
+        with:
+          path: ~/.npm
+          key: ghav8890-eslint-${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ghav8890-eslint-${{ runner.os }}-build-${{ env.cache-name }}-
+            ghav8890-eslint-${{ runner.os }}-build-
+      - id: install
+        name: Install eslint
+        run: npm ci
+      - name: Setup TurboRepo
+        if: ${{ env.SECRETS_TURBO_TOKEN != '' }}
+        run: |
+          echo "TURBO_TOKEN=${{ secrets.TURBO_TOKEN }}" >> $GITHUB_ENV
+          echo "TURBO_TEAM=${{ secrets.TURBO_TEAM }}" >> $GITHUB_ENV
+          echo "TURBO_CACHE=remote:rw" >> $GITHUB_ENV
+      - id: build
+        name: Build
+        run: npm run build
+      - name: Run eslint
+        id: fmt
+        run: |
+          rm -f .failed
+          npm run lint 2> eslint.err > eslint1.err || echo 'failed' > .failed
+          if [ -s .failed ]; then
+            delimiter="$(openssl rand -hex 8)"
+            echo "eslint_errs<<${delimiter}" >> "${GITHUB_OUTPUT}"
+            cat eslint.err >> "${GITHUB_OUTPUT}"
+            cat eslint1.err >> "${GITHUB_OUTPUT}"
+            echo "${delimiter}" >> "${GITHUB_OUTPUT}"
+          fi
+      - name: Fail the job
+        if: steps.fmt.outputs.eslint_errs != ''
+        run: |
+          echo 'ESLint reported errors for pinned source 639da369d86e232359a9f37356a32df2046dbaa4'
+          echo "${{ steps.fmt.outputs.eslint_errs }}"
+          exit 1
+      - name: Record complete lint and build witnesses
+        if: ${{ !cancelled() }}
+        run: |
+          test ! -s .failed
+          test -f eslint.err
+          test -f eslint1.err
+          test -f packages/core/dist/cjs/index.cjs
+          test -f packages/core/dist/esm/index.mjs
+          test -f packages/server/dist/index.js
+          test -f packages/app/dist/index.html
+          echo "GHAV_NODE_VERSION=$(node --version)"
+          echo "GHAV_NPM_VERSION=$(npm --version)"
+          echo "GHAV_FINAL_LOCK=$(sha256sum package-lock.json | cut -d' ' -f1)"
+          echo "GHAV_CORE_CJS=$(sha256sum packages/core/dist/cjs/index.cjs | cut -d' ' -f1)"
+          echo "GHAV_CORE_ESM=$(sha256sum packages/core/dist/esm/index.mjs | cut -d' ' -f1)"
+          echo "GHAV_SERVER=$(sha256sum packages/server/dist/index.js | cut -d' ' -f1)"
+          echo "GHAV_APP=$(sha256sum packages/app/dist/index.html | cut -d' ' -f1)"
+          echo "GHAV_LINT_STDOUT_BYTES=$(wc -c < eslint1.err | tr -d ' ')"
+          echo "GHAV_LINT_STDERR_BYTES=$(wc -c < eslint.err | tr -d ' ')"
