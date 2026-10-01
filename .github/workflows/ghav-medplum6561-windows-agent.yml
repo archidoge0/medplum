@@ -1,0 +1,110 @@
+name: GHAV Medplum 6561 Windows agent before
+
+on:
+  push:
+    branches: [codex/ghav-medplum6561-win-before]
+
+permissions:
+  contents: read
+
+jobs:
+  build-agent-win64:
+    name: Build Windows agent
+    runs-on: windows-2022
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      NODE_VERSION: '20'
+      TURBO_TOKEN: ''
+      TURBO_TEAM: ''
+      TURBO_CACHE: 'remote:rw'
+    steps:
+      - name: Checkout pinned Before source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: def24973e18e0c9f03738024691b5e00985ee288
+          persist-credentials: false
+      - name: Verify source tree and lock
+        run: |
+          test "$(git rev-parse HEAD)" = 'def24973e18e0c9f03738024691b5e00985ee288'
+          test "$(git rev-parse 'HEAD^{tree}')" = '60b7fe2ed890ffccc3a5e541f36d4c821e7ea749'
+          test -s package-lock.json
+          echo "GHAV_SOURCE_SHA=$(git rev-parse HEAD)"
+          echo "GHAV_SOURCE_TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "GHAV_INPUT_LOCK=$(sha256sum package-lock.json | cut -d' ' -f1)"
+      - name: Install NSIS
+        run: choco install nsis -y --no-progress
+      - name: Install Wget
+        run: choco install wget -y --no-progress
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20.20.2
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Install dependencies
+        run: npm ci --maxsockets 1
+      - name: Build
+        run: npm run build -- --filter=@medplum/agent
+      - name: Find signtool
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        id: find-signtool
+        with:
+          result-encoding: string
+          script: |
+            const fs = require('node:fs/promises');
+            const root = 'C:/Program Files (x86)/Windows Kits/10/bin/';
+            const folders = await fs.readdir(root);
+            let result = '';
+            let maxVersion = 0;
+            for (const folder of folders) {
+              if (!folder.endsWith('.0')) continue;
+              const version = parseInt(folder.replace(/\./g, ''));
+              if (version <= maxVersion) continue;
+              const candidate = `${root}${folder}/x64/signtool.exe`;
+              try {
+                if ((await fs.stat(candidate)).isFile()) {
+                  result = candidate;
+                  maxVersion = version;
+                }
+              } catch { /* continue to earlier SDK */ }
+            }
+            if (!result) throw new Error(`Unable to find signtool.exe in ${root}`);
+            console.log(result);
+            return result.replace(' ', '\\ ');
+      - name: Build Agent installer
+        run: ./scripts/build-agent-installer-win64.sh
+        env:
+          SIGNTOOL_PATH: ${{ steps.find-signtool.outputs.result }}
+          SKIP_SIGNING: 1
+      - name: Set Medplum version
+        run: |
+          set -e
+          echo "MEDPLUM_VERSION=$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
+      - name: Record complete installer witnesses
+        run: |
+          set -e
+          version=$(node -p "require('./package.json').version")
+          installer="packages/agent/medplum-agent-installer-$version.exe"
+          agent="packages/agent/dist/medplum-agent-$version-win64.exe"
+          test -s "$installer"
+          test -s "$installer.sha256"
+          test -s "$agent"
+          (cd packages/agent && sha256sum --check "medplum-agent-installer-$version.exe.sha256")
+          "$agent" --help > agent-help.txt
+          test -s agent-help.txt
+          echo "GHAV_NODE_VERSION=$(node --version)"
+          echo "GHAV_NPM_VERSION=$(npm --version)"
+          echo "GHAV_FINAL_LOCK=$(sha256sum package-lock.json | cut -d' ' -f1)"
+          echo "GHAV_INSTALLER_SHA=$(sha256sum "$installer" | cut -d' ' -f1)"
+          echo "GHAV_AGENT_SHA=$(sha256sum "$agent" | cut -d' ' -f1)"
+          echo "GHAV_HELP_SHA=$(sha256sum agent-help.txt | cut -d' ' -f1)"
+          echo "GHAV_INSTALLER_BYTES=$(wc -c < "$installer" | tr -d ' ')"
+      - name: Upload agent installer
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: medplum-agent-installer-${{ env.MEDPLUM_VERSION }}-windows
+          path: packages/agent/medplum-agent-installer-*
+          if-no-files-found: error
