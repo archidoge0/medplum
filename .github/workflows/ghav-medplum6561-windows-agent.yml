@@ -73,7 +73,7 @@ jobs:
             }
             if (!result) throw new Error(`Unable to find signtool.exe in ${root}`);
             console.log(result);
-            return result.replace(' ', '\\ ');
+            return result;
       - name: Build Agent installer
         run: ./scripts/build-agent-installer-win64.sh
         env:
