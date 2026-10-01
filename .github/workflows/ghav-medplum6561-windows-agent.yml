@@ -50,10 +50,10 @@ jobs:
           cache-name: cache-node-modules
         with:
           path: ~/.npm
-          key: ghav6561-win-${{ runner.os }}-build-agent-${{ env.cache-name }}-${{ hashFiles('**/package-lock.json') }}
+          key: ghav6561-win-r1-${{ runner.os }}-build-agent-${{ env.cache-name }}-${{ hashFiles('**/package-lock.json') }}
           restore-keys: |
-            ghav6561-win-${{ runner.os }}-build-agent-${{ env.cache-name }}-
-            ghav6561-win-${{ runner.os }}-build-agent-
+            ghav6561-win-r1-${{ runner.os }}-build-agent-${{ env.cache-name }}-
+            ghav6561-win-r1-${{ runner.os }}-build-agent-
       - name: Install dependencies
         run: npm ci --maxsockets 1
       - name: Build
@@ -83,7 +83,7 @@ jobs:
             }
             if (!result) throw new Error(`Unable to find signtool.exe in ${root}`);
             console.log(result);
-            return result.replace(' ', '\\ ');
+            return result;
       - name: Build Agent installer
         run: ./scripts/build-agent-installer-win64.sh
         env:
