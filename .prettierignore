@@ -4,3 +4,5 @@
 **/.next/**/*
 **/.docusaurus/**/*
 **/__test__/**/*.json
+# ghav harness files
+.github/workflows/ghav-*.yml
