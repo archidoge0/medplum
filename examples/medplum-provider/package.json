@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test": "FAKETIME_DONT_FAKE_MONOTONIC=1 faketime -f '@2026-04-08 23:35:11' vitest run",
     "test:coverage": "vitest run --coverage"
   },
   "prettier": {

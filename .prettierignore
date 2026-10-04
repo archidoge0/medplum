@@ -7,3 +7,5 @@
 **/ccda/testdata/**/*
 **/mock/src/mocks/**/*.json
 **/packages/definitions/src/fhir/**/*
+# ghav harness files
+.github/workflows/ghav-*.yml

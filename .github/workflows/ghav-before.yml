@@ -1,0 +1,137 @@
+name: "ghav before: Build"
+"on":
+  push:
+    branches:
+      - ghav/dev/8920
+    paths:
+      - .ghav/before
+permissions:
+  contents: read
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      pull-requests: write
+    strategy:
+      matrix:
+        node-version:
+          - 22
+          - 24
+    env:
+      NODE_OPTIONS: --max-old-space-size=8192
+      NODE_VERSION: ${{ matrix.node-version }}
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f
+        with:
+          node-version: ${{ matrix.node-version }}
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Cache node modules
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306
+        env:
+          cache-name: cache-node-modules
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}-
+            ${{ runner.os }}-build-
+            ${{ runner.os }}-
+      - name: Log npm stats
+        run: |
+          echo "node version: $(node --version)"
+          echo "npm version: $(npm --version)"
+      - name: Install
+        run: npm ci
+      - name: Build Project
+        run: npm run build
+        env:
+          MEDPLUM_BASE_URL: __MEDPLUM_BASE_URL__
+          MEDPLUM_CLIENT_ID: __MEDPLUM_CLIENT_ID__
+          MEDPLUM_REGISTER_ENABLED: __MEDPLUM_REGISTER_ENABLED__
+          GOOGLE_CLIENT_ID: __GOOGLE_CLIENT_ID__
+          RECAPTCHA_SITE_KEY: __RECAPTCHA_SITE_KEY__
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs:
+      - build
+    strategy:
+      matrix:
+        node-version:
+          - 22
+          - 24
+        pg-version:
+          - 14
+          - 18
+        redis-version:
+          - 7
+    env:
+      NODE_OPTIONS: --max-old-space-size=8192
+      NODE_VERSION: ${{ matrix.node-version }}
+      PG_VERSION: ${{ matrix.pg-version }}
+      REDIS_VERSION: ${{ matrix.redis-version }}
+    services:
+      postgres:
+        image: postgres:${{ matrix.pg-version }}
+        env:
+          POSTGRES_DB: medplum
+          POSTGRES_USER: medplum
+          POSTGRES_PASSWORD: medplum
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:${{ matrix.redis-version }}
+        options: --health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f
+        with:
+          node-version: ${{ matrix.node-version }}
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Cache node modules
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306
+        env:
+          cache-name: cache-node-modules
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}-
+            ${{ runner.os }}-build-
+            ${{ runner.os }}-
+      - id: install
+        name: Install deps
+        run: npm ci
+      - name: Wait for PostgreSQL
+        run: |
+          until pg_isready -h localhost -p 5432; do
+            echo "Waiting for postgres..."
+            sleep 2
+          done
+      - name: Run additional setup SQL
+        run: PGPASSWORD=medplum psql -h localhost -U medplum -d medplum -f ./postgres/init_test.sql
+        env:
+          PGPASSWORD: medplum
+      - name: "ghav: install faketime"
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq faketime >/dev/null
+      - name: Test
+        run: ./scripts/test.sh
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          REDIS_PASSWORD_DISABLED_IN_TESTS: 1
+          SERVER_TEST_CACHE_KEY: NODE${{ matrix.node-version }}-PG${{ matrix.pg-version }}-REDIS${{ matrix.redis-version }}
+          NO_COVERAGE: ${{ case(matrix.node-version == 22 && matrix.pg-version == 14 && matrix.redis-version == 7, '', '1') }}
